@@ -1,0 +1,8 @@
+# Install only inside this folder's virtual environment (see parent reply).
+pandas>=2.0
+streamlit>=1.28
+openai
+psycopg[binary]>=3.1
+python-dotenv>=1.0
+# Optional second UI:
+# gradio>=4.0

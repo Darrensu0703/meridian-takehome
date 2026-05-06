@@ -1,0 +1,11 @@
+rep_id,rep_name,segment,region,quota_q1_2026,manager,hire_date
+REP-01,Sarah Chen,Enterprise,West,900000,David Kim,2021-03-15
+REP-02,Marcus Rivera,Enterprise,Central,850000,David Kim,2022-07-01
+REP-03,Priya Patel,Enterprise,Northeast,950000,David Kim,2020-11-08
+REP-04,James Okafor,Enterprise,Southeast,800000,David Kim,2021-09-20
+REP-05,Danielle Torres,Mid-Market,West,480000,Lisa Huang,2022-02-14
+REP-06,Kevin Marsh,Mid-Market,Northeast,520000,Lisa Huang,2023-05-10
+REP-07,Aisha Williams,Mid-Market,Central,450000,Lisa Huang,2021-06-28
+REP-08,Tom Bradley,Mid-Market,Southeast,500000,Lisa Huang,2022-10-03
+REP-09,Lisa Park,SMB,West,250000,Carlos Reyes,2023-01-16
+REP-10,Ryan Cole,SMB,Northeast,220000,Carlos Reyes,2023-08-22

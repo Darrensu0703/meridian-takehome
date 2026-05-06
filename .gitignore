@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+
+# Local Python virtualenv
+.venv/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local app data / chat logs
+data/chat_store/
