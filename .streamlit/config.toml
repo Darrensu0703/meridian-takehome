@@ -1,0 +1,5 @@
+# One-click start from `run_streamlit.ps1`: that script opens your browser via Windows
+# `start` (reliable from a shortcut). Keep Streamlit from also calling Python's
+# webbrowser (often no tab when the shell was spawned from Explorer).
+[server]
+headless = true

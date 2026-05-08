@@ -74,14 +74,32 @@ def classify_question(question: str) -> RouteDecision:
             "Uses Q1 2026 Closed Won on deals.segment==Enterprise vs Enterprise reps' quota sum.",
         )
 
-    # --- 3) Pipeline closing before end of March --------------------------------
-    if "pipeline" in q and any(
-        w in q for w in ("march", "end of march", "before march", "march 31", "march 31st")
-    ):
+    # --- 3) Open pipeline with expected close on/before end of March 2026 --------
+    # Same analytic window as “before April 1” / “by April 1” (close_date <= 2026-03-31).
+    _pipeline_q1_close_phrases = (
+        "march",
+        "end of march",
+        "before march",
+        "march 31",
+        "march 31st",
+        "by end of march",
+        "before end of march",
+        "closing before end of march",
+        "close before end of march",
+        "april 1",
+        "april 1st",
+        "1st of april",
+        "first of april",
+        "before april",
+        "before april 1",
+        "by april 1",
+        "expected to close before april",
+    )
+    if "pipeline" in q and any(w in q for w in _pipeline_q1_close_phrases):
         return RouteDecision(
             QuestionIntent.PIPELINE_OPEN_BEFORE_END_MARCH,
-            ("pipeline", "march"),
-            "Open stages only; sum deal_value where close_date <= 2026-03-31 (contract example).",
+            ("pipeline", "q1 close window"),
+            "Open stages only; sum deal_value where close_date <= 2026-03-31 (incl. ‘before April 1’ wording).",
         )
 
     # --- 3b) Pipeline + close window outside the built-in March 2026 metric -----

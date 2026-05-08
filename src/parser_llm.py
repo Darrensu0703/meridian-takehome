@@ -59,6 +59,53 @@ def _safe_parse_intent(intent_name: Any) -> QuestionIntent:
     return QuestionIntent[intent_name]
 
 
+def _parse_llm_json_blob(raw: str) -> dict[str, Any] | None:
+    """Models often wrap JSON in ```json fences; Responses/Chat may add prose."""
+    text = raw.strip()
+    if not text:
+        return None
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        out = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    return out if isinstance(out, dict) else None
+
+
+def _classify_via_responses_api(client: Any, model: str, system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    resp = client.responses.create(
+        model=model,
+        temperature=0,
+        input=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+    )
+    raw = (getattr(resp, "output_text", None) or "").strip()
+    return _parse_llm_json_blob(raw)
+
+
+def _classify_via_chat_api(client: Any, model: str, system_prompt: str, user_prompt: str) -> dict[str, Any] | None:
+    resp = client.chat.completions.create(
+        model=model,
+        temperature=0,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+    choice = resp.choices[0].message
+    raw = (getattr(choice, "content", None) or "").strip()
+    return _parse_llm_json_blob(raw)
+
+
 def parse_question_with_llm(
     question: str,
     *,
@@ -116,7 +163,7 @@ def parse_question_with_llm(
         f"{question}\n\n"
         "Intent definitions:\n"
         "- ENTERPRISE_Q1_VS_QUOTA: Enterprise performance vs quota this quarter.\n"
-        "- PIPELINE_OPEN_BEFORE_END_MARCH: open pipeline value with close <= 2026-03-31.\n"
+        "- PIPELINE_OPEN_BEFORE_END_MARCH: open pipeline value with close <= 2026-03-31 (same as ‘before April 1’, end of March, Q1 close window in this demo).\n"
         "- PIPELINE_DATE_NOT_SUPPORTED: user wants pipeline for another close window (e.g. Dec 2025, 2025) not implemented in this demo.\n"
         "- REPS_AT_RISK_Q1: reps below 100% Q1 quota attainment.\n"
         "- IRONBRIDGE_LOSS_REASON: why/loss reason for Ironbridge deal.\n"
@@ -124,19 +171,16 @@ def parse_question_with_llm(
         "- UNKNOWN: does not clearly map.\n"
     )
 
+    parsed: dict[str, Any] | None = None
     try:
-        resp = client.responses.create(
-            model=model,
-            temperature=0,
-            input=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-        raw = (getattr(resp, "output_text", "") or "").strip()
-        parsed = json.loads(raw)
+        parsed = _classify_via_responses_api(client, model, system_prompt, user_prompt)
     except Exception:
-        return None
+        parsed = None
+    if not parsed:
+        try:
+            parsed = _classify_via_chat_api(client, model, system_prompt, user_prompt)
+        except Exception:
+            return None
 
     intent = _safe_parse_intent(parsed.get("intent"))
     confidence = _coerce_confidence(parsed.get("confidence"))

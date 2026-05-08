@@ -2,46 +2,141 @@
 Turn a user question into: summary text + trace tables + assumptions.
 
 Flow:
-  1) `classify_question` → intent (router.py)
-  2) Call the right `metrics` functions — **numbers always from pandas**, not the LLM
-  3) Return a dict your chat UI can render
+  1) `classify_question` → intent from **keyword rules** in `router.py` (fast, deterministic).
+  2) **Optional LLM override:** `parse_question_with_llm` runs when enabled + `OPENAI_API_KEY`
+     is set. If the model returns a **non-UNKNOWN** `QuestionIntent`, that **replaces** the
+     keyword intent and `routing_source` is `llm_parser`. **Numbers are never from the LLM** —
+     only which metrics branch runs.
+  3) Call the right `metrics.py` functions for the chosen intent.
+  4) Return a plain dict for the Streamlit / CLI UI.
 
 Where parameters live:
   • Dates / stages / Enterprise definition → `metrics.py` + ANALYTICS_CONTRACT.md
-  • Which formula runs → `router.py`
-  • Extra kwargs (e.g. March 31 cutoff) → hard-coded in the match branch below OR
-    parsed later from the question / LLM JSON.
+  • Which formula runs → final intent (keyword and/or LLM)
+  • Extra kwargs (e.g. March 31 cutoff) → hard-coded per intent branch or contract defaults.
 """
 
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import pandas as pd
 
 from . import metrics as m
-from .parser_llm import parse_question_with_llm
-from .router import QuestionIntent, classify_question
+from .parser_llm import LLMRoute, parse_question_with_llm
+from .router import QuestionIntent, RouteDecision, classify_question
+
+
+def _routing_detail_after_keyword(
+    llm_route: LLMRoute | None,
+    *,
+    used_llm: bool,
+) -> str:
+    """Explain routing for UI when keyword runs first; LLM may or may not override."""
+    if used_llm:
+        return (
+            "LLM classifier overrode keyword routing; intent is still a predefined "
+            "`QuestionIntent`. All numbers come from `metrics.py`."
+        )
+    base = "Intent from keyword rules in `router.py` (ordered matches)."
+    enabled = os.getenv("MERIDIAN_ENABLE_LLM_ROUTER", "1").strip().lower()
+    if enabled in {"0", "false", "off", "no"}:
+        return base + " LLM router disabled (`MERIDIAN_ENABLE_LLM_ROUTER`)."
+    if not os.getenv("OPENAI_API_KEY"):
+        return base + " LLM router skipped (no `OPENAI_API_KEY`)."
+    if llm_route is not None and llm_route.intent == QuestionIntent.UNKNOWN:
+        return base + " LLM also returned UNKNOWN — keyword intent kept."
+    if llm_route is None:
+        return base + " " + _routing_fallback_reason(llm_route)
+    return base
+
+
+def _routing_fallback_reason(llm_route: LLMRoute | None) -> str:
+    """Why the LLM path did not produce a usable override (keyword intent kept)."""
+    enabled = os.getenv("MERIDIAN_ENABLE_LLM_ROUTER", "1").strip().lower()
+    if enabled in {"0", "false", "off", "no"}:
+        return "LLM router disabled (`MERIDIAN_ENABLE_LLM_ROUTER`). Using keyword rules."
+    if not os.getenv("OPENAI_API_KEY"):
+        return "LLM router skipped — no `OPENAI_API_KEY` in this process."
+    if llm_route is not None and llm_route.intent == QuestionIntent.UNKNOWN:
+        return "LLM returned UNKNOWN."
+    return (
+        "LLM call failed or returned unusable JSON (network/API/parse); keyword intent kept."
+    )
+
+
+_FOLLOWUP_LOGIC_TRIGGERS = (
+    "how was",
+    "how did you",
+    "show the logic",
+    "show me the logic",
+    "show me the sql",
+    "show the sql",
+    "show sql",
+    "show me sql",
+    "what sql",
+    "the sql",
+    "the query",
+    "the computation",
+    "underlying query",
+    "underlying sql",
+    "underlying logic",
+    "explain the logic",
+    "explain the computation",
+    "explain the query",
+    "explain the sql",
+)
 
 
 def is_followup_logic_request(text: str) -> bool:
-    """True if the user is asking how the last answer was computed / for SQL-like detail."""
+    """True if the user is asking how the *previous* answer was computed.
+
+    Conservative: only fires for short, follow-up-shaped messages that do not
+    look like a fresh analytics question. A message like "How is Enterprise
+    tracking against quota? Also give me the SQL equivalent" is a NEW question
+    that happens to mention SQL — it must NOT short-circuit to the prior
+    snapshot.
+    """
     t = text.strip().lower()
-    if len(t) > 240:
+    # Short-circuit only on short, focused follow-ups. Anything long is a new
+    # question with extra requests bolted on.
+    if not t or len(t) > 120:
         return False
-    keys = (
-        "sql",
-        "query",
-        "underlying",
-        "how was",
-        "how did you",
-        "explain the",
-        "show the logic",
-        "computation",
-        "logic",
+    # If the message contains analytics-question shape (e.g. "how is", "how much",
+    # "what is", a $ amount, a quarter/quota/segment/pipeline term) it is a fresh
+    # question, not a logic follow-up.
+    new_question_signals = (
+        "how is ",
+        "how much",
+        "how many",
+        "what is",
+        "what's",
+        "whats ",
+        "which ",
+        "who ",
+        "list ",
+        "create ",
+        "delete ",
+        "quota",
+        "pipeline",
+        "segment",
+        "enterprise",
+        "smb",
+        "mid-market",
+        "midmarket",
+        "ironbridge",
+        "this quarter",
+        "this month",
+        "q1",
+        "q2",
+        "q3",
+        "q4",
     )
-    return any(k in t for k in keys)
+    if any(sig in t for sig in new_question_signals):
+        return False
+    return any(k in t for k in _FOLLOWUP_LOGIC_TRIGGERS)
 
 
 def _conversation_context_for_llm(
@@ -78,13 +173,18 @@ def answer_question(
 
     llm_ctx = _conversation_context_for_llm(structured_checkpoint, conversation_tail)
     llm_route = parse_question_with_llm(question, conversation_context=llm_ctx)
+
+    used_llm = False
     if llm_route is not None and llm_route.intent != QuestionIntent.UNKNOWN:
         intent = llm_route.intent
         routing_source = "llm_parser"
+        used_llm = True
         route = route._replace(
             matched_keywords=llm_route.matched_phrases or route.matched_keywords,
             notes=f"LLM parser: {llm_route.reasoning or 'classified by semantic phrasing.'}",
         )
+
+    routing_detail = _routing_detail_after_keyword(llm_route, used_llm=used_llm)
     assumptions = (
         "Assumptions follow ANALYTICS_CONTRACT.md: Q1 2026 = close_date between "
         "2026-01-01 and 2026-03-31; pipeline = open stages only unless stated otherwise."
@@ -290,6 +390,7 @@ def answer_question(
     return {
         "intent": intent.name,
         "routing_source": routing_source,
+        "routing_detail": routing_detail,
         "matched_keywords": route.matched_keywords,
         "routing_notes": route.notes,
         "summary": "\n".join(summary_lines),

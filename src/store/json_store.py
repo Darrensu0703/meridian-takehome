@@ -37,6 +37,24 @@ class JsonConversationStore:
         threads.sort(key=lambda t: t.updated_at, reverse=True)
         return threads
 
+    def list_thread_summaries(self):
+        from . import ThreadSummary
+
+        with self._lock:
+            raw = self._load_raw()
+        items = []
+        for d in raw.get("threads", {}).values():
+            items.append(
+                ThreadSummary(
+                    id=d.get("id", ""),
+                    title=d.get("title", ""),
+                    created_at=d.get("created_at", ""),
+                    updated_at=d.get("updated_at", ""),
+                )
+            )
+        items.sort(key=lambda s: s.updated_at, reverse=True)
+        return items
+
     def get_thread(self, thread_id: str) -> ChatThread | None:
         with self._lock:
             raw = self._load_raw()

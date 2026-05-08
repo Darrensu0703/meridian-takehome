@@ -23,6 +23,8 @@ class ChatMessage:
     created_at: str = field(default_factory=utc_now_iso)
     """Assistant messages may carry a compact snapshot for reload / provenance."""
     result_snapshot: dict[str, Any] | None = None
+    """Visible commentary/tool/final trace for agentic answers."""
+    agent_steps: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -30,6 +32,7 @@ class ChatMessage:
             "content": self.content,
             "created_at": self.created_at,
             "result_snapshot": self.result_snapshot,
+            "agent_steps": self.agent_steps,
         }
 
     @staticmethod
@@ -39,6 +42,7 @@ class ChatMessage:
             content=d["content"],
             created_at=d.get("created_at", utc_now_iso()),
             result_snapshot=d.get("result_snapshot"),
+            agent_steps=list(d.get("agent_steps") or []),
         )
 
 

@@ -16,8 +16,12 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     role TEXT NOT NULL,
     content TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL,
-    result_snapshot JSONB
+    result_snapshot JSONB,
+    agent_steps JSONB NOT NULL DEFAULT '[]'::jsonb
 );
+
+ALTER TABLE IF EXISTS chat_messages
+    ADD COLUMN IF NOT EXISTS agent_steps JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_chat_messages_thread ON chat_messages (thread_id);
 CREATE INDEX IF NOT EXISTS idx_chat_threads_updated ON chat_threads (updated_at DESC);
